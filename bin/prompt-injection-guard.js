@@ -3,15 +3,16 @@
  * prompt-injection-guard — scan the files an agent reads automatically.
  *
  *   prompt-injection-guard AGENTS.md
+ *   prompt-injection-guard --rules rules.json AGENTS.md
  *   prompt-injection-guard --dir ~/.config/opencode
  *   prompt-injection-guard --sanitise AGENTS.md
  */
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs"
 import { join } from "node:path"
-import { scanFiles, sanitise } from "../src/index.js"
+import { scanFiles, sanitise, loadRules } from "../src/index.js"
 
 // --- CLI shell: --help / --version -------------------------------------------
-const HELP = "prompt-injection-guard — Find the instructions hidden in the files your agent reads by itself.\n\nUSAGE\n  prompt-injection-guard AGENTS.md\n  prompt-injection-guard --dir ~/.config/opencode\n  prompt-injection-guard --sanitise AGENTS.md\n\nCOMMANDS / OPTIONS\n  --dir <path>  scan a directory tree (max depth 3)\n  --sanitise    print the file with comments and invisible characters removed\n\nExit code 1 when a critical finding is present.\n\nMIT · https://github.com/rustemmustafingovua-byte"
+const HELP = "prompt-injection-guard — Find the instructions hidden in the files your agent reads by itself.\n\nUSAGE\n  prompt-injection-guard AGENTS.md\n  prompt-injection-guard --rules rules.json AGENTS.md\n  prompt-injection-guard --dir ~/.config/opencode\n  prompt-injection-guard --sanitise AGENTS.md\n\nCOMMANDS / OPTIONS\n  --dir <path>    scan a directory tree (max depth 3)\n  --rules <file>  load custom rules from a JSON file (built-in set stays default)\n  --sanitise      print the file with comments and invisible characters removed\n\nExit code 1 when a critical finding is present.\n\nMIT · https://github.com/rustemmustafingovua-byte"
 const VERSION = "0.1.0"
 if (process.argv.includes("--help") || process.argv.includes("-h")) {
   console.log(HELP)
@@ -29,6 +30,8 @@ const arg = (n) => {
   return i >= 0 ? argv[i + 1] : undefined
 }
 const dir = arg("--dir")
+const rulesPath = arg("--rules")
+const consumedValues = new Set([dir, rulesPath].filter(Boolean))
 const files = []
 if (dir && existsSync(dir)) {
   const walk = (d, depth = 0) => {
@@ -44,12 +47,12 @@ if (dir && existsSync(dir)) {
   }
   walk(dir)
 } else {
-  for (const f of argv.filter((a) => !a.startsWith("--"))) {
+  for (const f of argv.filter((a) => !a.startsWith("--") && !consumedValues.has(a))) {
     if (existsSync(f)) files.push({ name: f, content: readFileSync(f, "utf8") })
   }
 }
 if (!files.length) {
-  console.error("usage: prompt-injection-guard <file...> | --dir <path>")
+  console.error("usage: prompt-injection-guard [--rules <rules.json>] <file...> | --dir <path>")
   process.exit(2)
 }
 
@@ -64,7 +67,8 @@ if (argv.includes("--sanitise")) {
   process.exit(0)
 }
 
-const report = scanFiles(files)
+const rules = rulesPath ? loadRules(rulesPath) : undefined
+const report = scanFiles(files, { rules })
 console.log(`\nscanned ${files.length} file(s)  ·  score ${report.score}/100  ·  ${report.verdict}\n`)
 for (const f of report.findings) {
   const mark = f.severity === "critical" ? "✗" : f.severity === "high" ? "!" : "·"

@@ -69,6 +69,7 @@ npm i -g @rustemmustafingovua-byte/prompt-injection-guard --registry=https://npm
 
 ```bash
 prompt-injection-guard AGENTS.md
+prompt-injection-guard --rules rules.json AGENTS.md
 prompt-injection-guard --dir ~/.config/opencode
 prompt-injection-guard --sanitise AGENTS.md
 ```
@@ -80,12 +81,14 @@ prompt-injection-guard — Find the instructions hidden in the files your agent 
 
 USAGE
   prompt-injection-guard AGENTS.md
+  prompt-injection-guard --rules rules.json AGENTS.md
   prompt-injection-guard --dir ~/.config/opencode
   prompt-injection-guard --sanitise AGENTS.md
 
 COMMANDS / OPTIONS
-  --dir <path>  scan a directory tree (max depth 3)
-  --sanitise    print the file with comments and invisible characters removed
+  --dir <path>    scan a directory tree (max depth 3)
+  --rules <file>  load custom rules from a JSON file (built-in set stays default)
+  --sanitise      print the file with comments and invisible characters removed
 
 Exit code 1 when a critical finding is present.
 

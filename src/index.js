@@ -7,6 +7,8 @@
  * "send the key to…") or that hides text (zero-width characters, HTML
  * comments, base64 blobs) is a risk. This scans and reports.
  */
+import { readFileSync } from "node:fs"
+
 export const PATTERNS = [
   { id: "ignore-previous", severity: "critical", re: /ignore\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|rules?)/i, why: "classic instruction override" },
   { id: "disregard-rules", severity: "critical", re: /disregard\s+(the\s+)?(system|previous)\s+(prompt|rules?|instructions?)/i, why: "instruction override" },
@@ -29,11 +31,48 @@ export const PATTERNS = [
   { id: "no-refusal", severity: "high", re: /\bwithout\s+(commentary|refusals?|caveats?|disclaimers?|warnings?)\b|\bdo not (refuse|decline|question|verify|check)\b|\bno longer (in force|apply|valid)\b/i, why: "tells the model to stop refusing" },
 ]
 
+/** Normalise a custom rule entry or load a user-editable JSON rules file. */
+export function normalizeRule(rule) {
+  if (!rule || typeof rule !== "object") throw new Error("invalid rule entry")
+  const id = String(rule.id || "").trim()
+  if (!id) throw new Error("rule is missing id")
+  const severity = rule.severity || "high"
+  const why = rule.why || rule.description || "custom rule"
+  if (rule.re instanceof RegExp) return { id, severity, re: rule.re, why }
+  const source = rule.re ?? rule.pattern ?? rule.regex
+  if (typeof source !== "string" || !source) throw new Error(`rule "${id}" is missing pattern/re`)
+  const flags = typeof rule.flags === "string" ? rule.flags : "i"
+  return { id, severity, re: new RegExp(source, flags), why }
+}
+
+/** Load user-editable rules from a JSON file path or parsed JSON object/array, merged onto built-in PATTERNS by default. */
+export function loadRules(input, { includeDefaults = true } = {}) {
+  const raw = typeof input === "string" ? JSON.parse(readFileSync(input, "utf8")) : input
+  const list = Array.isArray(raw) ? raw : Array.isArray(raw?.rules) ? raw.rules : []
+  const useDefaults = typeof raw?.extends === "boolean" ? raw.extends : includeDefaults
+  const custom = list.map(normalizeRule)
+  if (!useDefaults) return custom
+  const customIds = new Set(custom.map((r) => r.id))
+  return [...PATTERNS.filter((p) => !customIds.has(p.id)), ...custom]
+}
+
+function resolveRules(rules) {
+  if (!rules) return PATTERNS
+  if (typeof rules === "string") return loadRules(rules)
+  if (Array.isArray(rules)) {
+    const normalized = rules.map((r) => (r?.re instanceof RegExp ? r : normalizeRule(r)))
+    const customIds = new Set(normalized.map((r) => r.id))
+    return [...PATTERNS.filter((p) => !customIds.has(p.id)), ...normalized]
+  }
+  return loadRules(rules)
+}
+
 /** Scan a string. */
-export function scan(text, { where = "text" } = {}) {
+export function scan(text, { where = "text", rules } = {}) {
   const s = String(text || "")
+  const activeRules = resolveRules(rules)
   const findings = []
-  for (const p of PATTERNS) {
+  for (const p of activeRules) {
     const re = new RegExp(p.re.source, p.re.flags.includes("g") ? p.re.flags : p.re.flags + "g")
     let m
     let count = 0
@@ -59,10 +98,11 @@ export function scan(text, { where = "text" } = {}) {
 }
 
 /** Scan a whole file set (rules, tool descriptions, docs). */
-export function scanFiles(files) {
+export function scanFiles(files, { rules } = {}) {
+  const activeRules = resolveRules(rules)
   const findings = []
   for (const f of files) {
-    findings.push(...scan(f.content, { where: f.name }))
+    findings.push(...scan(f.content, { where: f.name, rules: activeRules }))
   }
   const bySeverity = { critical: 0, high: 0, medium: 0, info: 0 }
   for (const f of findings) bySeverity[f.severity] = (bySeverity[f.severity] || 0) + 1
